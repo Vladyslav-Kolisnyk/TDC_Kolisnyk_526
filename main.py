@@ -5,6 +5,8 @@ from math import gcd
 from scipy.signal import resample_poly, butter, sosfiltfilt
 import numpy as np
 import matplotlib.pyplot as plt
+from skimage.restoration import denoise_wavelet, denoise_invariant, denoise_tv_chambolle, denoise_bilateral
+import pywt
 
 SAMPLE_RATE = 44100
 SAMPLE_WIDTH = 2
@@ -104,8 +106,74 @@ def recognize_speech(rec, mic):
     result["Текст"] = rec.recognize_google(audio, show_all=False, language="uk-UA")
     return result
 
-if __name__ == "__main__":
-    recognizer = srec.Recognizer()
-    microphone = srec.Microphone()
+def wavelet_denoiser(signal, level, mode, wavelet):
+    """
+    Denoise a 1D signal using Discrete Wavelet Transform (DWT) thresholding.
+    Args:
+    signal (np.ndarray): The input signal.
+    wavelet (str): The name of the mother wavelet (e.g., 'db4', 'sym5', etc.).
+    level (int): The level of decomposition.
+    mode (str): Thresholding mode, 'soft' or 'hard'.
+    Returns:
+    np.ndarray: The denoised signal.
+    """
+    coeffs = pywt.wavedec(signal, wavelet, level=level)
+    sigma = np.median(np.abs(coeffs[-1])) / 0.6745
+    threshold = sigma * np.sqrt(2 * np.log(signal.size))
+    denoised_coeffs = [coeffs[0]] + [
+    pywt.threshold(c, threshold, mode=mode) for c in coeffs[1:]
+    ]
+    denoised_signal = pywt.waverec(denoised_coeffs, wavelet)
+    return denoised_signal[:len(signal)]
 
-    sound_recoder(recognizer, microphone)
+def invarince_denoiser(image, **kwargs):
+    return denoise_wavelet(image, sigma=0.5, wavelet='db4', mode='soft')
+
+def sound_filter():
+    data, fs_original = sf.read(NAME_ORIGINAL_WAV)
+    time = np.arange(len(data)) / fs_original
+    data_2d = data.reshape(1, -1)
+
+    invariance = denoise_invariant(data_2d, denoise_function = invarince_denoiser).flatten()
+    total_variation = denoise_tv_chambolle(data_2d, weight=0.1, channel_axis=None).flatten()
+    bilateral = denoise_bilateral(data_2d, sigma_color=0.05, sigma_spatial=15, channel_axis=None).flatten()
+    wavelet = wavelet_denoiser(data, level=5, mode='soft', wavelet='db4')
+
+    sf.write("./Sounds/Filtered_Invariance.wav", invariance, SAMPLE_RATE)
+    sf.write("./Sounds/Filtered_Total_Variation.wav", total_variation, SAMPLE_RATE)
+    sf.write("./Sounds/Filtered_Bilateral.wav", bilateral, SAMPLE_RATE)
+    sf.write("./Sounds/Filtered_Wavelet.wav", wavelet, SAMPLE_RATE)
+
+    denoised_signals = [
+        {
+            "signal": invariance,
+            "name": "Filtered_Invariance"
+        },
+        {
+            "signal": total_variation,
+            "name": "Total_Variation"
+        },
+        {
+            "signal": bilateral,
+            "name": "Filtered_Bilateral"
+        },
+        {
+            "signal": wavelet,
+            "name": "Filtered_Wavelet"
+        },
+    ]
+
+    for denoised_signal in denoised_signals:
+        plt.figure(figsize=(10, 6))
+        plt.plot(time, data, 'b-', label='Original Clean Signal')
+        plt.plot(time, denoised_signal["signal"], 'g-', linewidth=2, label=denoised_signal["name"])
+        plt.title(denoised_signal["name"])
+        plt.xlabel("Time")
+        plt.ylabel("Amplitude")
+        plt.legend()
+        plt.grid(True)
+        plt.savefig("./Sounds/" + denoised_signal["name"] + ".png")
+        plt.show()  
+
+if __name__ == "__main__":
+    sound_filter()

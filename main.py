@@ -1,11 +1,10 @@
 import speech_recognition as srec
-import speech_recognition as srec
 import soundfile as sf
 from math import gcd
-from scipy.signal import resample_poly, butter, sosfiltfilt
+from scipy.signal import resample_poly, butter, sosfiltfilt, convolve
 import numpy as np
 import matplotlib.pyplot as plt
-from skimage.restoration import denoise_wavelet, denoise_invariant, denoise_tv_chambolle, denoise_bilateral
+from skimage.restoration import denoise_wavelet, denoise_invariant, denoise_tv_chambolle, denoise_bilateral, cycle_spin
 import pywt
 
 SAMPLE_RATE = 44100
@@ -106,7 +105,7 @@ def recognize_speech(rec, mic):
     result["Текст"] = rec.recognize_google(audio, show_all=False, language="uk-UA")
     return result
 
-def wavelet_denoiser(signal, level, mode, wavelet):
+def wavelet_denoiser(signal, level=5, mode='hard', wavelet='db4'):
     """
     Denoise a 1D signal using Discrete Wavelet Transform (DWT) thresholding.
     Args:
@@ -175,5 +174,57 @@ def sound_filter():
         plt.savefig("./Sounds/" + denoised_signal["name"] + ".png")
         plt.show()  
 
+def gaussian_kernel(size, sigma):
+    x = np.linspace(-(size // 2), size // 2, size)
+    kernel = np.exp(-0.5 * (x / sigma) ** 2)
+    return kernel / kernel.sum()
+
+def wavelet_shifted_filter():
+    data, fs_original = sf.read(NAME_ORIGINAL_WAV)
+    time = np.arange(len(data)) / fs_original
+
+    max_shifts = [0, 1, 3, 5]
+    signals = []
+    for n, s in enumerate(max_shifts):
+        sig_filtered = cycle_spin(
+        data,
+        func=wavelet_denoiser,
+        max_shifts=s,
+        shift_steps=5
+        )
+        sf.write(f"./Sounds/Filtered_Shifted_Wavelet_{n}.wav", sig_filtered, SAMPLE_RATE)
+        signals.append(sig_filtered)
+
+    kernel = gaussian_kernel(size=11, sigma=2)
+    filtered_signal = convolve(data, kernel, mode='same')
+    sf.write(f"./Sounds/Filtered_Gaussian_Filter.wav", filtered_signal, SAMPLE_RATE)
+
+    plt.figure(figsize=(12, 6))
+    plt.plot(time, data, label=f"Оригінал (fs={SAMPLE_RATE} Гц)")
+    plt.plot(time, signals[0], label=f"Wavelet Shifted: no shift")
+    plt.plot(time, signals[1], label=f"Wavelet Shifted: 1x2")
+    plt.plot(time, signals[2], label=f"Wavelet Shifted: 1x4")
+    plt.plot(time, signals[3], label=f"Wavelet Shifted: 1x6")
+    plt.title("Порівняння сигналів у часовій області, вейвлет-фільтр, модифікований")
+    plt.xlabel("Час (мс)")
+    plt.ylabel("Амплітуда")
+    plt.grid(True)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig("./Sounds/Порівняння сигналів у часовій області, вейвлет-фільтр, модифікований.png")
+    plt.show()
+
+    plt.figure(figsize=(12, 6))
+    plt.plot(time, data, label=f"Оригінал (fs={SAMPLE_RATE} Гц)")
+    plt.plot(time, filtered_signal, label=f"Gaussian Filter")
+    plt.title("Порівняння сигналів у часовій області, фільтр Гаусса")
+    plt.xlabel("Час (мс)")
+    plt.ylabel("Амплітуда")
+    plt.grid(True)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig("./Sounds/Порівняння сигналів у часовій області, фільтр Гаусса.png")
+    plt.show()
+
 if __name__ == "__main__":
-    sound_filter()
+    wavelet_shifted_filter()

@@ -234,56 +234,129 @@ def to_scientific_pretty(x, precision=2):
     mantissa = mantissa.rstrip('0').rstrip('.')
     return f"{mantissa} · 10{str(int(exponent)).translate(superscripts)}"
 
+def filtration_efficiency():
+    data, fs_original = sf.read(NAME_ORIGINAL_WAV)
+    signal_power = np.mean(data ** 2)
+    max_shifts = 5
+    mse_wt_mean = []
+    mse_wt_list = []
+    mse_g_mean = []
+    mse_g_list = []
+    snr_values = []
+
+    for SNR_dB in np.arange(-10, 21, 0.5):
+        mse_wt = []
+        mse_g = []
+
+        for i in range(0, 10):
+            noise_power = signal_power / (10 ** (SNR_dB / 10))
+            noise = np.random.normal(0, np.sqrt(noise_power), size=data.shape)
+            noisy_signal = data + noise
+            sig_filtered_wavelet = cycle_spin(noisy_signal, func=wavelet_denoiser, max_shifts=max_shifts, shift_steps=5, num_workers=1)
+            kernel = gaussian_kernel(size=11, sigma=2)
+            sig_filtered_gaussian = convolve(noisy_signal, kernel, mode='same')
+            mse_wavelet = mean_squared_error(data, sig_filtered_wavelet)
+            mse_gaussian = mean_squared_error(data, sig_filtered_gaussian)
+            mse_wt.append(mse_wavelet)
+            mse_g.append(mse_gaussian)
+        
+        mse_wt_mean.append(np.mean(mse_wt))
+        mse_wt_list.append(list(mse_wt))
+        mse_g_mean.append(np.mean(mse_g))
+        mse_g_list.append(list(mse_g))
+        snr_values.append(SNR_dB)
+
+    snr_scatter_wt = []
+    mse_scatter_wt = []
+    snr_scatter_g = []
+    mse_scatter_g = []
+    
+    for snr, mse_list in zip(snr_values, mse_wt_list):
+        snr_scatter_wt.extend([snr] * len(mse_list))
+        mse_scatter_wt.extend(mse_list)
+        
+    for snr, mse_list in zip(snr_values, mse_g_list):
+        snr_scatter_g.extend([snr] * len(mse_list))
+        mse_scatter_g.extend(mse_list)
+
+    fig, axes = plt.subplots(1, 2, figsize=(25, 10))
+    axes[0].scatter(snr_scatter_wt, mse_scatter_wt, color='red', alpha=0.05, label="Окремі значення MSE")
+    axes[0].plot(snr_values, mse_wt_mean, linewidth=2, label="Середнє MSE WT")
+    axes[0].scatter(snr_scatter_g, mse_scatter_g, color='green', alpha=0.05, label="Окремі значення MSE")
+    axes[0].plot(snr_values, mse_g_mean, linewidth=2, label="Середнє MSE GF")
+    axes[0].set_xticks(np.arange(-10, 21, 2))
+    axes[0].set_xlabel("SNR (дБ)")
+    axes[0].set_ylabel("MSE")
+    axes[0].grid(True)
+    axes[0].legend()
+    axes[0].set_title("Лінійний масштаб")
+    axes[1].scatter(snr_scatter_wt, mse_scatter_wt, color='red', alpha=0.05, label="Окремі значення MSE")
+    axes[1].plot(snr_values, mse_wt_mean, linewidth=2, label="Середнє MSE WT")
+    axes[1].scatter(snr_scatter_g, mse_scatter_g, color='green', alpha=0.05, label="Окремі значення MSE")
+    axes[1].plot(snr_values, mse_g_mean, linewidth=2, label="Середнє MSE GF")
+    axes[1].set_xticks(np.arange(-10, 21, 1))
+    axes[1].set_xlabel("SNR (дБ)")
+    axes[1].set_ylabel("MSE")
+    axes[1].grid(True)
+    axes[1].set_yscale('log')
+    axes[1].legend()
+    axes[1].set_title("Логарифмічний масштаб")
+    plt.savefig("./Sounds/Залежність параметру MSE від значень SNR для вейвлет-фільтру тафільтру Гаусса у лінійному та логарифмічному масштабі", dpi=600)
+    plt.tight_layout()
+    plt.show()
+
 if __name__ == "__main__":
     # wavelet_shifted_filter()
     # recognizer = srec.Recognizer()
     # microphone = srec.Microphone(device_index=1, sample_rate=SAMPLE_RATE)
     # sound_recoder(recognizer, microphone)
     
-    results = []
-    row = []
-    headers = ['MSE', 'MAE', 'RMSE', 'R2', 'D']
-    data_original, fs = sf.read(NAME_ORIGINAL_WAV)
-    wav_files = glob.glob("./Sounds/*.wav")
+    # results = []
+    # row = []
+    # headers = ['MSE', 'MAE', 'RMSE', 'R2', 'D']
+    # data_original, fs = sf.read(NAME_ORIGINAL_WAV)
+    # wav_files = glob.glob("./Sounds/*.wav")
 
-    for sounds in wav_files:
-        sounds = sounds.replace("\\", "/")
+    # for sounds in wav_files:
+    #     sounds = sounds.replace("\\", "/")
 
-        if sounds == NAME_ORIGINAL_WAV:
-            continue
-        elif sounds == NAME_RESAMPLED_WAV:
-            row.append('Ресемпл 4 кГц')
-            data, fs = sf.read(sounds)
-            data = resample(data, len(data_original))
+    #     if sounds == NAME_ORIGINAL_WAV:
+    #         continue
+    #     elif sounds == NAME_RESAMPLED_WAV:
+    #         row.append('Ресемпл 4 кГц')
+    #         data, fs = sf.read(sounds)
+    #         data = resample(data, len(data_original))
 
-            mse = mean_squared_error(data_original, data)
-            mae = mean_absolute_error(data_original, data)
-            rmse = np.sqrt(mse)
-            r2 = r2_score(data_original, data)
-            D = np.var(data_original - data)
-            results.append([to_scientific_pretty(mse), to_scientific_pretty(mae), to_scientific_pretty(rmse), round(r2, 2), to_scientific_pretty(D)])
-        else:
-            type_filter = sounds.replace('./Sounds/Filtered_', '')
-            type_filter = type_filter.replace('.wav', '')
-            type_filter = type_filter.replace('_', ' ')
-            if type_filter == '4000[Hz] 2[byte]':
-                type_filter = 'Лінійний фільтр 4 кГц'
-            row.append(type_filter)
+    #         mse = mean_squared_error(data_original, data)
+    #         mae = mean_absolute_error(data_original, data)
+    #         rmse = np.sqrt(mse)
+    #         r2 = r2_score(data_original, data)
+    #         D = np.var(data_original - data)
+    #         results.append([to_scientific_pretty(mse), to_scientific_pretty(mae), to_scientific_pretty(rmse), round(r2, 2), to_scientific_pretty(D)])
+    #     else:
+    #         type_filter = sounds.replace('./Sounds/Filtered_', '')
+    #         type_filter = type_filter.replace('.wav', '')
+    #         type_filter = type_filter.replace('_', ' ')
+    #         if type_filter == '4000[Hz] 2[byte]':
+    #             type_filter = 'Лінійний фільтр 4 кГц'
+    #         row.append(type_filter)
 
-            data, fs = sf.read(sounds)
-            mse = mean_squared_error(data_original, data)
-            mae = mean_absolute_error(data_original, data)
-            rmse = np.sqrt(mse)
-            r2 = r2_score(data_original, data)
-            D = np.var(data_original - data)
-            results.append([to_scientific_pretty(mse), to_scientific_pretty(mae), to_scientific_pretty(rmse), round(r2, 2), to_scientific_pretty(D)])
+    #         data, fs = sf.read(sounds)
+    #         mse = mean_squared_error(data_original, data)
+    #         mae = mean_absolute_error(data_original, data)
+    #         rmse = np.sqrt(mse)
+    #         r2 = r2_score(data_original, data)
+    #         D = np.var(data_original - data)
+    #         results.append([to_scientific_pretty(mse), to_scientific_pretty(mae), to_scientific_pretty(rmse), round(r2, 2), to_scientific_pretty(D)])
 
-    n_rows = len(row)
-    n_cols = len(headers)
-    fig, ax = plt.subplots(figsize=(n_cols * 2.8, n_rows * 0.4))
-    ax.axis("off")
-    table = ax.table(cellText=results, colLabels=headers, rowLabels=row, loc="center", cellLoc="center")
-    table.set_fontsize(14)
-    table.scale(0.8, 2)
-    plt.savefig("./Sounds/Розрахунок метриків для всих типів фільтрів", dpi=600)
-    plt.show()
+    # n_rows = len(row)
+    # n_cols = len(headers)
+    # fig, ax = plt.subplots(figsize=(n_cols * 2.8, n_rows * 0.4))
+    # ax.axis("off")
+    # table = ax.table(cellText=results, colLabels=headers, rowLabels=row, loc="center", cellLoc="center")
+    # table.set_fontsize(14)
+    # table.scale(0.8, 2)
+    # plt.savefig("./Sounds/Розрахунок метриків для всих типів фільтрів", dpi=600)
+    # plt.show()
+    
+    filtration_efficiency()
